@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use config::{Config as ConfigLoader, Environment, File};
 use serde::Deserialize;
 
@@ -59,14 +59,10 @@ impl Config {
         let loaded = builder.build()?;
         let file_config = loaded.try_deserialize::<FileConfig>()?;
 
-        let path_glob = file_config
-            .path
-            .unwrap_or_else(|| "~/.local/share/calendars/*".to_string());
+        let path_glob =
+            file_config.path.unwrap_or_else(|| "~/.local/share/calendars/*".to_string());
         let cache_path = expand_home(
-            file_config
-                .cache_path
-                .as_deref()
-                .unwrap_or("~/.cache/todors/cache.sqlite3"),
+            file_config.cache_path.as_deref().unwrap_or("~/.cache/todors/cache.sqlite3"),
         );
 
         if path_glob.trim().is_empty() {
@@ -78,16 +74,10 @@ impl Config {
             cache_path,
             default_list: file_config.default_list,
             default_due_hours: file_config.default_due.unwrap_or(24),
-            date_format: file_config
-                .date_format
-                .unwrap_or_else(|| "%Y-%m-%d".to_string()),
-            time_format: file_config
-                .time_format
-                .unwrap_or_else(|| "%H:%M".to_string()),
+            date_format: file_config.date_format.unwrap_or_else(|| "%Y-%m-%d".to_string()),
+            time_format: file_config.time_format.unwrap_or_else(|| "%H:%M".to_string()),
             dt_separator: file_config.dt_separator.unwrap_or_else(|| " ".to_string()),
-            default_command: file_config
-                .default_command
-                .unwrap_or_else(|| "list".to_string()),
+            default_command: file_config.default_command.unwrap_or_else(|| "list".to_string()),
             color: file_config.color.unwrap_or_else(|| "auto".to_string()),
             humanize: file_config.humanize.unwrap_or(false),
             startable: file_config.startable.unwrap_or(false),
@@ -106,10 +96,10 @@ fn default_config_path() -> PathBuf {
 }
 
 pub fn expand_home(value: &str) -> PathBuf {
-    if let Some(rest) = value.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
+    if let Some(rest) = value.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
     }
     PathBuf::from(value)
 }

@@ -3,7 +3,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::{Duration, Local};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
@@ -178,8 +178,8 @@ pub fn run(cli: Cli, config: &Config, app: &mut AppStore) -> Result<()> {
 }
 
 fn command_from_default(config: &Config) -> Command {
-    if config.default_command.trim() == "list" {
-        return Command::List(ListArgs {
+    let list = || {
+        Command::List(ListArgs {
             lists: Vec::new(),
             location: None,
             grep: None,
@@ -193,23 +193,26 @@ fn command_from_default(config: &Config) -> Command {
             startable: false,
             status: "NEEDS-ACTION,IN-PROCESS".to_string(),
             all: false,
-        });
+        })
+    };
+
+    let default = config.default_command.trim().to_ascii_lowercase();
+    if default.is_empty() {
+        return list();
     }
-    Command::List(ListArgs {
-        lists: Vec::new(),
-        location: None,
-        grep: None,
-        sort: None,
-        reverse: true,
-        no_reverse: false,
-        due: None,
-        category: Vec::new(),
-        priority: None,
-        start: None,
-        startable: false,
-        status: "NEEDS-ACTION,IN-PROCESS".to_string(),
-        all: false,
-    })
+    if default == "list" {
+        return list();
+    }
+    if default == "lists" {
+        return Command::Lists;
+    }
+    if default == "repl" {
+        return Command::Repl;
+    }
+    if default == "flush" {
+        return Command::Flush;
+    }
+    list()
 }
 
 fn list(args: ListArgs, config: &Config, app: &mut AppStore, porcelain: bool) -> Result<()> {
@@ -217,9 +220,7 @@ fn list(args: ListArgs, config: &Config, app: &mut AppStore, porcelain: bool) ->
     let _color_mode = config.color.as_str();
     if !args.lists.is_empty() {
         todos.retain(|(_, todo)| {
-            args.lists
-                .iter()
-                .any(|name| todo.list_name.eq_ignore_ascii_case(name))
+            args.lists.iter().any(|name| todo.list_name.eq_ignore_ascii_case(name))
         });
     }
     if !args.all {
@@ -248,11 +249,9 @@ fn list(args: ListArgs, config: &Config, app: &mut AppStore, porcelain: bool) ->
     }
     if !args.category.is_empty() {
         todos.retain(|(_, todo)| {
-            args.category.iter().all(|cat| {
-                todo.categories
-                    .iter()
-                    .any(|item| item.eq_ignore_ascii_case(cat))
-            })
+            args.category
+                .iter()
+                .all(|cat| todo.categories.iter().any(|item| item.eq_ignore_ascii_case(cat)))
         });
     }
     if let Some(priority) = args.priority {
@@ -268,32 +267,30 @@ fn list(args: ListArgs, config: &Config, app: &mut AppStore, porcelain: bool) ->
         let now = Local::now();
         todos.retain(|(_, todo)| todo.start.map(|start| start <= now).unwrap_or(true));
     }
-    if let Some(start_filter) = args.start {
-        if start_filter.len() == 2 {
-            let mode = start_filter[0].to_ascii_lowercase();
-            let dt = parse_user_datetime(&start_filter[1], config)?;
-            todos.retain(|(_, todo)| {
-                if let Some(start) = todo.start {
-                    if mode == "before" {
-                        return start <= dt;
-                    }
-                    if mode == "after" {
-                        return start >= dt;
-                    }
+    if let Some(start_filter) = args.start
+        && start_filter.len() == 2
+    {
+        let mode = start_filter[0].to_ascii_lowercase();
+        let dt = parse_user_datetime(&start_filter[1], config)?;
+        todos.retain(|(_, todo)| {
+            if let Some(start) = todo.start {
+                if mode == "before" {
+                    return start <= dt;
                 }
-                false
-            });
-        }
+                if mode == "after" {
+                    return start >= dt;
+                }
+            }
+            false
+        });
     }
 
     let reverse = if args.no_reverse { false } else { args.reverse };
     sort_todos(&mut todos, args.sort.as_deref(), reverse);
 
     if porcelain {
-        let payload: Vec<PorcelainTodo> = todos
-            .iter()
-            .map(|(id, todo)| PorcelainTodo::from_parts(*id, todo))
-            .collect();
+        let payload: Vec<PorcelainTodo> =
+            todos.iter().map(|(id, todo)| PorcelainTodo::from_parts(*id, todo)).collect();
         println!("{}", serde_json::to_string_pretty(&payload)?);
         return Ok(());
     }
@@ -321,17 +318,10 @@ fn create(args: NewArgs, config: &Config, app: &mut AppStore) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("unknown list: {}", list_name))?
         .clone();
     let due_hours = args.due_hours.unwrap_or(config.default_due_hours);
-    let due = if due_hours > 0 {
-        Some(Local::now() + Duration::hours(due_hours))
-    } else {
-        None
-    };
+    let due = if due_hours > 0 { Some(Local::now() + Duration::hours(due_hours)) } else { None };
 
-    let description = if args.read_description {
-        Some(read_stdin_all()?)
-    } else {
-        args.description
-    };
+    let description =
+        if args.read_description { Some(read_stdin_all()?) } else { args.description };
 
     let mut todo = Todo {
         uid: String::new(),
@@ -350,30 +340,17 @@ fn create(args: NewArgs, config: &Config, app: &mut AppStore) -> Result<()> {
     };
     let id = app.save_new(&list, &mut todo)?;
     println!("created {}", id);
-    output::print_detailed(
-        &todo,
-        &config.date_format,
-        &config.time_format,
-        &config.dt_separator,
-    );
+    output::print_detailed(&todo, &config.date_format, &config.time_format, &config.dt_separator);
     Ok(())
 }
 
 fn show(id: i64, config: &Config, app: &mut AppStore, porcelain: bool) -> Result<()> {
     let todo = app.todo_by_id(id)?;
     if porcelain {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&PorcelainTodo::from_parts(id, &todo))?
-        );
+        println!("{}", serde_json::to_string_pretty(&PorcelainTodo::from_parts(id, &todo))?);
         return Ok(());
     }
-    output::print_detailed(
-        &todo,
-        &config.date_format,
-        &config.time_format,
-        &config.dt_separator,
-    );
+    output::print_detailed(&todo, &config.date_format, &config.time_format, &config.dt_separator);
     Ok(())
 }
 
@@ -444,18 +421,10 @@ fn edit(args: EditArgs, config: &Config, app: &mut AppStore, porcelain: bool) ->
 
     app.save_existing(&todo)?;
     if porcelain {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&PorcelainTodo::from_parts(args.id, &todo))?
-        );
+        println!("{}", serde_json::to_string_pretty(&PorcelainTodo::from_parts(args.id, &todo))?);
         return Ok(());
     }
-    output::print_detailed(
-        &todo,
-        &config.date_format,
-        &config.time_format,
-        &config.dt_separator,
-    );
+    output::print_detailed(&todo, &config.date_format, &config.time_format, &config.dt_separator);
     Ok(())
 }
 
@@ -562,7 +531,13 @@ fn copy_todo(id: i64, list_name: &str, app: &mut AppStore, porcelain: bool) -> R
 
 fn edit_raw_file(path: &Path) -> Result<()> {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
-    let status = ProcessCommand::new(editor).arg(path).status()?;
+    let status = ProcessCommand::new("sh")
+        .arg("-c")
+        .arg("$1 \"$2\"")
+        .arg("sh")
+        .arg(&editor)
+        .arg(path)
+        .status()?;
     if status.success() {
         return Ok(());
     }
@@ -610,11 +585,11 @@ fn repl_loop(config: &Config, app: &mut AppStore, porcelain: bool) -> Result<()>
             list_lists(app, porcelain)?;
             continue;
         }
-        if let Some(rest) = input.strip_prefix("show ") {
-            if let Ok(id) = rest.trim().parse::<i64>() {
-                show(id, config, app, porcelain)?;
-                continue;
-            }
+        if let Some(rest) = input.strip_prefix("show ")
+            && let Ok(id) = rest.trim().parse::<i64>()
+        {
+            show(id, config, app, porcelain)?;
+            continue;
         }
         println!("unsupported repl command: {}", input);
     }
@@ -641,11 +616,7 @@ fn confirm(prompt: &str) -> Result<bool> {
 
 fn parse_status_filter(raw: &str) -> Result<Vec<Status>> {
     let mut statuses = Vec::new();
-    for token in raw
-        .split(',')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-    {
+    for token in raw.split(',').map(str::trim).filter(|part| !part.is_empty()) {
         if token.eq_ignore_ascii_case("ANY") {
             return Ok(vec![
                 Status::NeedsAction,
@@ -665,19 +636,13 @@ fn parse_user_datetime(raw: &str, config: &Config) -> Result<chrono::DateTime<Lo
     let full = format!("{}{}{}", raw, config.dt_separator, "00:00");
     if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(
         &full,
-        &format!(
-            "{}{}{}",
-            config.date_format, config.dt_separator, config.time_format
-        ),
-    ) {
-        if let Some(value) = naive.and_local_timezone(Local).single() {
-            return Ok(value);
-        }
+        &format!("{}{}{}", config.date_format, config.dt_separator, config.time_format),
+    ) && let Some(value) = naive.and_local_timezone(Local).single()
+    {
+        return Ok(value);
     }
     let naive = chrono::NaiveDate::parse_from_str(raw, &config.date_format)?;
-    let with_time = naive
-        .and_hms_opt(0, 0, 0)
-        .ok_or_else(|| anyhow::anyhow!("invalid date"))?;
+    let with_time = naive.and_hms_opt(0, 0, 0).ok_or_else(|| anyhow::anyhow!("invalid date"))?;
     with_time
         .and_local_timezone(Local)
         .single()
@@ -698,11 +663,7 @@ fn sort_todos(todos: &mut [(i64, Todo)], sort: Option<&str>, reverse: bool) {
             let mut ord = match field {
                 "id" => left.0.cmp(&right.0),
                 "summary" => left.1.summary.cmp(&right.1.summary),
-                "priority" => left
-                    .1
-                    .priority
-                    .unwrap_or(255)
-                    .cmp(&right.1.priority.unwrap_or(255)),
+                "priority" => left.1.priority.unwrap_or(255).cmp(&right.1.priority.unwrap_or(255)),
                 "due" => left.1.due.cmp(&right.1.due),
                 "start" => left.1.start.cmp(&right.1.start),
                 "status" => left.1.status.as_str().cmp(right.1.status.as_str()),
@@ -721,10 +682,7 @@ fn sort_todos(todos: &mut [(i64, Todo)], sort: Option<&str>, reverse: bool) {
 }
 
 fn print_compact_row(id: i64, todo: &Todo, show_list: bool, date_format: &str) {
-    let due = todo
-        .due
-        .map(|due| due.format(date_format).to_string())
-        .unwrap_or_default();
+    let due = todo.due.map(|due| due.format(date_format).to_string()).unwrap_or_default();
     if show_list {
         println!(
             "{} {} {:<3} {:<12} {} @{} ({}%)",
@@ -783,5 +741,40 @@ impl PorcelainTodo {
             list: todo.list_name.clone(),
             path: todo.path.display().to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Command, command_from_default};
+    use crate::config::Config;
+    use std::path::PathBuf;
+
+    fn config_with_default(default_command: &str) -> Config {
+        Config {
+            path_glob: "~/.local/share/calendars/*".to_string(),
+            cache_path: PathBuf::from("/tmp/cache.sqlite3"),
+            default_list: None,
+            default_due_hours: 24,
+            date_format: "%Y-%m-%d".to_string(),
+            time_format: "%H:%M".to_string(),
+            dt_separator: " ".to_string(),
+            default_command: default_command.to_string(),
+            color: "auto".to_string(),
+            humanize: false,
+            startable: false,
+        }
+    }
+
+    #[test]
+    fn resolves_non_list_default_commands() {
+        let lists = command_from_default(&config_with_default("lists"));
+        assert!(matches!(lists, Command::Lists));
+
+        let repl = command_from_default(&config_with_default("repl"));
+        assert!(matches!(repl, Command::Repl));
+
+        let flush = command_from_default(&config_with_default("flush"));
+        assert!(matches!(flush, Command::Flush));
     }
 }

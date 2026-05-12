@@ -6,12 +6,7 @@ pub fn print_detailed(todo: &Todo, date_format: &str, time_format: &str, dt_sepa
     println!("status: {}", todo.status.as_ical());
     println!("list: {}", todo.list_name);
     if let Some(due) = todo.due {
-        println!(
-            "due: {}{}{}",
-            due.format(date_format),
-            dt_separator,
-            due.format(time_format)
-        );
+        println!("due: {}{}{}", due.format(date_format), dt_separator, due.format(time_format));
     }
     if let Some(start) = todo.start {
         println!(

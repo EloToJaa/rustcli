@@ -62,11 +62,7 @@ pub struct Todo {
 
 impl Todo {
     pub fn done_marker(&self) -> &'static str {
-        if self.status == Status::Completed {
-            "[X]"
-        } else {
-            "[ ]"
-        }
+        if self.status == Status::Completed { "[X]" } else { "[ ]" }
     }
 
     pub fn priority_marker(&self) -> &'static str {

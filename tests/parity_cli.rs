@@ -41,17 +41,8 @@ fn has_todoman() -> bool {
     output.status.success()
 }
 
-fn run_cmd(bin: &str, args: &[&str]) -> std::process::Output {
-    Command::new(bin).args(args).output().expect("run command")
-}
-
 fn run_with_config(bin: &str, config: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(bin)
-        .arg("--config")
-        .arg(config)
-        .args(args)
-        .output()
-        .expect("run command")
+    Command::new(bin).arg("--config").arg(config).args(args).output().expect("run command")
 }
 
 fn assert_success(output: &std::process::Output, context: &str) {
@@ -69,14 +60,8 @@ fn parse_first_status_and_summary(json: &str) -> (Option<String>, Option<String>
     let Some(first) = value.as_array().and_then(|items| items.first()) else {
         return (None, None);
     };
-    let status = first
-        .get("status")
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
-    let summary = first
-        .get("summary")
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
+    let status = first.get("status").and_then(|value| value.as_str()).map(str::to_string);
+    let summary = first.get("summary").and_then(|value| value.as_str()).map(str::to_string);
     (status, summary)
 }
 
@@ -168,15 +153,9 @@ fn done_and_undo_parity_if_todoman_available() {
 
     let ours_list = run_with_config(bin, &config, &["--porcelain", "list", "--status", "ANY"]);
     assert_success(&ours_list, "todors porcelain list --status ANY after done");
-    let theirs_list = run_with_config(
-        "todoman",
-        &todoman_config,
-        &["--porcelain", "list", "--status", "ANY"],
-    );
-    assert_success(
-        &theirs_list,
-        "todoman porcelain list --status ANY after done",
-    );
+    let theirs_list =
+        run_with_config("todoman", &todoman_config, &["--porcelain", "list", "--status", "ANY"]);
+    assert_success(&theirs_list, "todoman porcelain list --status ANY after done");
     let ours_pair = parse_first_status_and_summary(&String::from_utf8_lossy(&ours_list.stdout));
     let theirs_pair = parse_first_status_and_summary(&String::from_utf8_lossy(&theirs_list.stdout));
     assert_eq!(ours_pair.0, theirs_pair.0);
@@ -188,19 +167,10 @@ fn done_and_undo_parity_if_todoman_available() {
 
     let ours_after_undo =
         run_with_config(bin, &config, &["--porcelain", "list", "--status", "ANY"]);
-    assert_success(
-        &ours_after_undo,
-        "todors porcelain list --status ANY after undo",
-    );
-    let theirs_after_undo = run_with_config(
-        "todoman",
-        &todoman_config,
-        &["--porcelain", "list", "--status", "ANY"],
-    );
-    assert_success(
-        &theirs_after_undo,
-        "todoman porcelain list --status ANY after undo",
-    );
+    assert_success(&ours_after_undo, "todors porcelain list --status ANY after undo");
+    let theirs_after_undo =
+        run_with_config("todoman", &todoman_config, &["--porcelain", "list", "--status", "ANY"]);
+    assert_success(&theirs_after_undo, "todoman porcelain list --status ANY after undo");
     let ours_after_undo_pair =
         parse_first_status_and_summary(&String::from_utf8_lossy(&ours_after_undo.stdout));
     let theirs_after_undo_pair =

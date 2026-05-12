@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::config;
 
@@ -45,9 +45,5 @@ fn list_display_name(path: &Path) -> Result<String> {
             return Ok(trimmed.to_string());
         }
     }
-    Ok(path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("unknown")
-        .to_string())
+    Ok(path.file_name().and_then(|name| name.to_str()).unwrap_or("unknown").to_string())
 }
