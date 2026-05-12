@@ -22,3 +22,11 @@
 - README is only a placeholder; do not assume undocumented commands or architecture.
 - There is currently no CI workflow or repo-local lint/format/typecheck config checked in.
 - Keep changes simple and crate-local unless the user asks for larger structure.
+
+## Post-Change Workflow
+- After each code change, run these steps in order:
+  1. `cargo fmt --all`
+  2. `cargo clippy --all-targets --all-features -- -D warnings`
+  3. `cargo build`
+  4. `cargo test`
+  5. `cargo audit`
