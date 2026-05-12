@@ -9,6 +9,7 @@ use crate::config;
 pub struct TodoList {
     pub name: String,
     pub path: PathBuf,
+    pub color: Option<String>,
 }
 
 pub fn discover_lists(path_glob: &str) -> Result<Vec<TodoList>> {
@@ -25,7 +26,8 @@ pub fn discover_lists(path_glob: &str) -> Result<Vec<TodoList>> {
             continue;
         }
         let name = list_display_name(&path)?;
-        lists.push(TodoList { name, path });
+        let color = list_color(&path)?;
+        lists.push(TodoList { name, path, color });
     }
 
     if lists.is_empty() {
@@ -46,4 +48,17 @@ fn list_display_name(path: &Path) -> Result<String> {
         }
     }
     Ok(path.file_name().and_then(|name| name.to_str()).unwrap_or("unknown").to_string())
+}
+
+fn list_color(path: &Path) -> Result<Option<String>> {
+    let color_file = path.join("color");
+    if !color_file.exists() {
+        return Ok(None);
+    }
+    let value = fs::read_to_string(color_file)?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(trimmed.to_string()))
 }

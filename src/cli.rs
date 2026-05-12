@@ -21,6 +21,7 @@ pub struct Cli {
     #[arg(long)]
     porcelain: bool,
     #[arg(long = "colour", alias = "color")]
+    #[arg(value_parser = ["auto", "always", "never"])]
     color: Option<String>,
     #[arg(long)]
     humanize: bool,
@@ -152,7 +153,9 @@ impl Cli {
 }
 
 pub fn run(cli: Cli, config: &Config, app: &mut AppStore) -> Result<()> {
-    let _cli_color = cli.color.as_deref().unwrap_or(config.color.as_str());
+    let color_mode =
+        output::ColorMode::parse(cli.color.as_deref().unwrap_or(config.color.as_str()))?;
+    let theme = output::OutputTheme::from_mode(color_mode);
     let _humanize = cli.humanize || config.humanize;
     let command = match cli.command {
         Some(command) => command,
@@ -160,17 +163,17 @@ pub fn run(cli: Cli, config: &Config, app: &mut AppStore) -> Result<()> {
     };
 
     match command {
-        Command::List(args) => list(args, config, app, cli.porcelain),
-        Command::New(args) => create(args, config, app),
-        Command::Show { id } => show(id, config, app, cli.porcelain),
-        Command::Edit(args) => edit(args, config, app, cli.porcelain),
+        Command::List(args) => list(args, config, app, cli.porcelain, &theme),
+        Command::New(args) => create(args, config, app, &theme),
+        Command::Show { id } => show(id, config, app, cli.porcelain, &theme),
+        Command::Edit(args) => edit(args, config, app, cli.porcelain, &theme),
         Command::Done { ids } => update_status(ids, Status::Completed, app, cli.porcelain),
         Command::Undo { ids } => update_status(ids, Status::NeedsAction, app, cli.porcelain),
         Command::Cancel { ids } => update_status(ids, Status::Cancelled, app, cli.porcelain),
         Command::Delete { ids, yes } => delete(ids, yes, app, cli.porcelain),
         Command::Flush => flush(app, cli.porcelain),
         Command::Lists => list_lists(app, cli.porcelain),
-        Command::Repl => repl_loop(config, app, cli.porcelain),
+        Command::Repl => repl_loop(config, app, cli.porcelain, &theme),
         Command::Path { id } => path(id, app),
         Command::Move { id, list } => move_todo(id, &list, app, cli.porcelain),
         Command::Copy { id, list } => copy_todo(id, &list, app, cli.porcelain),
@@ -215,9 +218,14 @@ fn command_from_default(config: &Config) -> Command {
     list()
 }
 
-fn list(args: ListArgs, config: &Config, app: &mut AppStore, porcelain: bool) -> Result<()> {
+fn list(
+    args: ListArgs,
+    config: &Config,
+    app: &mut AppStore,
+    porcelain: bool,
+    theme: &output::OutputTheme,
+) -> Result<()> {
     let mut todos = app.all_todos()?;
-    let _color_mode = config.color.as_str();
     if !args.lists.is_empty() {
         todos.retain(|(_, todo)| {
             args.lists.iter().any(|name| todo.list_name.eq_ignore_ascii_case(name))
@@ -297,12 +305,18 @@ fn list(args: ListArgs, config: &Config, app: &mut AppStore, porcelain: bool) ->
 
     let show_list = args.lists.is_empty() && app.lists().len() > 1;
     for (id, todo) in todos {
-        print_compact_row(id, &todo, show_list, &config.date_format);
+        let list_color = app.list_by_name(&todo.list_name).and_then(|list| list.color.as_deref());
+        println!("{}", theme.compact_row(id, &todo, show_list, &config.date_format, list_color));
     }
     Ok(())
 }
 
-fn create(args: NewArgs, config: &Config, app: &mut AppStore) -> Result<()> {
+fn create(
+    args: NewArgs,
+    config: &Config,
+    app: &mut AppStore,
+    theme: &output::OutputTheme,
+) -> Result<()> {
     if args.summary.is_empty() {
         bail!("summary is required");
     }
@@ -340,21 +354,46 @@ fn create(args: NewArgs, config: &Config, app: &mut AppStore) -> Result<()> {
     };
     let id = app.save_new(&list, &mut todo)?;
     println!("created {}", id);
-    output::print_detailed(&todo, &config.date_format, &config.time_format, &config.dt_separator);
+    theme.print_detailed(
+        &todo,
+        &config.date_format,
+        &config.time_format,
+        &config.dt_separator,
+        list.color.as_deref(),
+    );
     Ok(())
 }
 
-fn show(id: i64, config: &Config, app: &mut AppStore, porcelain: bool) -> Result<()> {
+fn show(
+    id: i64,
+    config: &Config,
+    app: &mut AppStore,
+    porcelain: bool,
+    theme: &output::OutputTheme,
+) -> Result<()> {
     let todo = app.todo_by_id(id)?;
     if porcelain {
         println!("{}", serde_json::to_string_pretty(&PorcelainTodo::from_parts(id, &todo))?);
         return Ok(());
     }
-    output::print_detailed(&todo, &config.date_format, &config.time_format, &config.dt_separator);
+    let list_color = app.list_by_name(&todo.list_name).and_then(|list| list.color.as_deref());
+    theme.print_detailed(
+        &todo,
+        &config.date_format,
+        &config.time_format,
+        &config.dt_separator,
+        list_color,
+    );
     Ok(())
 }
 
-fn edit(args: EditArgs, config: &Config, app: &mut AppStore, porcelain: bool) -> Result<()> {
+fn edit(
+    args: EditArgs,
+    config: &Config,
+    app: &mut AppStore,
+    porcelain: bool,
+    theme: &output::OutputTheme,
+) -> Result<()> {
     let mut todo = app.todo_by_id(args.id)?;
     if args.raw {
         edit_raw_file(&todo.path)?;
@@ -366,11 +405,14 @@ fn edit(args: EditArgs, config: &Config, app: &mut AppStore, porcelain: bool) ->
             );
             return Ok(());
         }
-        output::print_detailed(
+        let list_color =
+            app.list_by_name(&updated.list_name).and_then(|list| list.color.as_deref());
+        theme.print_detailed(
             &updated,
             &config.date_format,
             &config.time_format,
             &config.dt_separator,
+            list_color,
         );
         return Ok(());
     }
@@ -424,7 +466,14 @@ fn edit(args: EditArgs, config: &Config, app: &mut AppStore, porcelain: bool) ->
         println!("{}", serde_json::to_string_pretty(&PorcelainTodo::from_parts(args.id, &todo))?);
         return Ok(());
     }
-    output::print_detailed(&todo, &config.date_format, &config.time_format, &config.dt_separator);
+    let list_color = app.list_by_name(&todo.list_name).and_then(|list| list.color.as_deref());
+    theme.print_detailed(
+        &todo,
+        &config.date_format,
+        &config.time_format,
+        &config.dt_separator,
+        list_color,
+    );
     Ok(())
 }
 
@@ -544,7 +593,12 @@ fn edit_raw_file(path: &Path) -> Result<()> {
     bail!("editor exited with status: {}", status)
 }
 
-fn repl_loop(config: &Config, app: &mut AppStore, porcelain: bool) -> Result<()> {
+fn repl_loop(
+    config: &Config,
+    app: &mut AppStore,
+    porcelain: bool,
+    theme: &output::OutputTheme,
+) -> Result<()> {
     use std::io::{self, Write};
 
     let mut line = String::new();
@@ -578,7 +632,7 @@ fn repl_loop(config: &Config, app: &mut AppStore, porcelain: bool) -> Result<()>
                 status: "NEEDS-ACTION,IN-PROCESS".to_string(),
                 all: false,
             };
-            list(args, config, app, porcelain)?;
+            list(args, config, app, porcelain, theme)?;
             continue;
         }
         if input.eq_ignore_ascii_case("lists") {
@@ -588,7 +642,7 @@ fn repl_loop(config: &Config, app: &mut AppStore, porcelain: bool) -> Result<()>
         if let Some(rest) = input.strip_prefix("show ")
             && let Ok(id) = rest.trim().parse::<i64>()
         {
-            show(id, config, app, porcelain)?;
+            show(id, config, app, porcelain, theme)?;
             continue;
         }
         println!("unsupported repl command: {}", input);
@@ -679,32 +733,6 @@ fn sort_todos(todos: &mut [(i64, Todo)], sort: Option<&str>, reverse: bool) {
         }
         left.0.cmp(&right.0)
     });
-}
-
-fn print_compact_row(id: i64, todo: &Todo, show_list: bool, date_format: &str) {
-    let due = todo.due.map(|due| due.format(date_format).to_string()).unwrap_or_default();
-    if show_list {
-        println!(
-            "{} {} {:<3} {:<12} {} @{} ({}%)",
-            id,
-            todo.done_marker(),
-            todo.priority_marker(),
-            due,
-            todo.summary,
-            todo.list_name,
-            todo.percent_complete
-        );
-        return;
-    }
-    println!(
-        "{} {} {:<3} {:<12} {} ({}%)",
-        id,
-        todo.done_marker(),
-        todo.priority_marker(),
-        due,
-        todo.summary,
-        todo.percent_complete
-    );
 }
 
 #[derive(Serialize)]
